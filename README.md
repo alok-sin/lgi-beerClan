@@ -9,6 +9,5 @@ The implementation of LGI
 
 For instance:
 
-`java -cp libs/*:Moses.jar InteractiveAgent 127.0.0.1 9000 ./pingpong.law foo {}`
+`java -cp libs/*:Moses.jar InteractiveAgent 127.0.0.1 9000 ./bc.law foo {}`
 
-If no argument is provided, the help message will be displayed.
