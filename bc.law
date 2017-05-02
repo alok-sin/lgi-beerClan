@@ -1,0 +1,273 @@
+law(dosc, language(coffeescript))
+
+# Messages are dicts of type: {messageId:messageText}
+
+
+
+# Create founders => "{\"founder\": true}"
+UPON "adopted", ->
+  DO "set", key: "member", value: false
+  if @arguments.founder is true
+    DO "set", key: "founder", value: @arguments.founder
+    DO "set", key: "member", value: @arguments.founder
+    DO "deliver", message: "#{@self} is formed as founder"
+  DO "deliver", message: "spawned: "
+  return true
+
+#============================================== START: Invite
+UPON "sent", ->
+  if @message.type is "invite"
+    if CS("member")? and CS("member") is true
+      DO "forward"
+      DO "deliver", message: "inviting!!"
+    else
+      DO "deliver", message: "you are not a member of this community... yet!"
+    return true
+
+UPON "arrived", ->
+  if @message.type is "invite" and (CS("member") is not true or not CS("member")?)
+    # send gossip
+    # how to send profile info
+    DO "forward", receiver: @sender, sender: @self, message: {"type":"joinRequest"}
+    DO "deliver", message: "sending join request!"
+    return true
+
+# propagate gossip
+UPON "arrived", ->
+  if @message.type is "joinRequest" and CS("member") is true
+    DO "deliver", message: "sending gossip for joining!"
+    if not CS("gossip:joinRequest:#{@sender}")?
+      DO "set", key: "gossip:joinRequest:#{@sender}", value: true
+      DO "deliver", message: "got join request from #{@sender}"
+      # forward gossip to followers
+      DO "forward", receiver: @sender, sender: @self, message: {"type":"approval"}
+      if CS("followers")?
+        for person in CS("followers")
+          DO "deliver", message: "sender: #{@sender}, receiver: #{person}, messages: #{@self}"
+          DO "forward", receiver: person, sender: @sender, message: @message
+        # approve joinRequest - can send with user discretion or with certain probability
+      else
+        DO "deliver", message: "No followers for joinReq gossip"
+    return true
+
+# Get approvals and add as member
+UPON "arrived", ->
+  if @message.type is "approval" and not CS("member") is true
+    DO "deliver", message: "GOT APPROVEDDD from #{@sender}"
+    if not CS("approvals")?
+      DO "set", key:"approvals", value: 1
+    else
+      DO "set", key:"approvals", value: CS("approvals") + 1
+    if CS("approvals") >= 3 # because we know that this CS will increment by one and that the update to a CS is not reflected before the event returns
+      DO "set", key:"member", value: true
+      DO "deliver", message: "you are now a member of this prestigious community!"
+    return true
+
+#============================================== END: Invite
+
+
+#============================================== START: Removal
+UPON "sent", ->
+  if @message.type is "remove"
+    if CS("member")? and CS("member") is true
+      DO "forward"
+      DO "deliver", message: "removing!!"
+    else
+      DO "deliver", message: "you are not a member of this community... yet!"
+    return true
+
+UPON "arrived", ->
+  if @message.type is "remove" and CS("member") is true and not CS("founder")?
+    # send gossip
+    # how to send profile info
+    DO "forward", receiver: @sender, sender: @self, message: {"type":"removeRequest"}
+    DO "deliver", message: "sending remove request!"
+    return true
+
+# propagate gossip
+UPON "arrived", ->
+  if @message.type is "removeRequest" and CS("member") is true
+    DO "deliver", message: "sending gossip for removals!"
+    if not CS("gossip:removeRequest:#{@sender}")?
+      DO "set", key: "gossip:removeRequest:#{@sender}", value: true
+      DO "deliver", message: "got join request from #{@sender}"
+      # approve removeRequest - can send with user discretion or with certain probability
+      DO "forward", receiver: @sender, sender: @self, message: {"type":"removal"}
+      # forward gossip to followers
+      if CS("followers")?
+        for person in CS("followers")
+          DO "deliver", message: "sender: #{@sender}, receiver: #{person}, self: #{@self}"
+          DO "forward", receiver: person, sender: @sender, message: @message
+        # approve joinRequest - can send with user discretion or with certain probability
+      else
+        DO "deliver", message: "No followers for removeReq gossip"
+    return true
+
+
+# Get removals and remove as member
+UPON "arrived", ->
+  if @message.type is "removal" and CS("member")? and CS("member") is true
+    DO "deliver", message: "GOT REMOVEDD): from #{@sender}"
+    if not CS("removals")?
+      DO "set", key:"removals", value: 1
+    else
+      DO "set", key:"removals", value: CS("removals") + 1
+    if CS("removals") >= 3
+      DO "set", key:"member", value: false
+      # Disconnecting the actor because of high disapprovals
+      DO "set", key:"removals", value: 0
+      DO "set", key:"approvals", value: 0
+
+      DO "deliver", message: "you are now not a member of this prestigious community!"
+    return true
+#============================================== END: Removal
+
+
+#============================================== START: Post
+
+UPON "arrived", ->
+  if @message.type is "post" and CS("member") is true
+    DO "deliver"
+    return true
+
+UPON "sent", ->
+  if @message.type is "post" and CS("member") is true
+    DO "deliver", message: "got post.. forwarding"
+    for person in CS("followers")
+      DO "forward", receiver: person, message: @message
+      DO "deliver", message: "deliver message #{@message} to #{person}"
+    return true
+
+
+#============================================== END: Post
+
+#============================================== START: Follow, -- cant remove followers
+UPON "sent", ->
+  if @message.type is "addFollower" and CS("member") is true
+    DO "deliver", message: "adding follower #{@receiver}"
+    DO "forward"
+    return true
+
+UPON "arrived", ->
+  if @message.type is "addFollower" and CS("member") is true
+    addFollower("#{@sender}")
+    DO "deliver", message: "added follower #{@sender}"
+    return true
+
+UPON "sent", ->
+  if @message.type is "removeFollower" and CS("member") is true
+    DO "deliver", message: "removing follower #{@receiver}"
+    DO "forward"
+    return true
+
+UPON "arrived", ->
+  if @message.type is "removeFollower" and CS("member") is true
+    removeFollower("#{@sender}")
+    DO "deliver", message: "removed follower #{@sender}"
+    return true
+#============================================== START: Friend, -- cant remove followers
+UPON "arrived", ->
+  if @message.type is "addFriend" and CS("member") is true
+    addFriend("#{@sender}")
+    DO "deliver", message: "receive friend req from : #{@sender}"
+    DO "forward", receiver: @sender, sender: @self, message: {"type":"addFriendAck"}
+    return true
+
+UPON "sent", ->
+  if @message.type is "addFriend" and CS("member") is true and (not CS("addFriendReq:#{@receiver}")? or CS("addFriendReq:#{@receiver}") is false)
+    DO "set", key:"addFriendReq:#{@receiver}", value: true
+    DO "deliver", message: "sending friend req to #{@receiver}"
+    DO "forward"
+    return true
+
+UPON "arrived", ->
+  if @message.type is "addFriendAck" and CS("member") is true and CS("addFriendReq:#{@sender}") is true
+    addFriend("#{@sender}")
+    DO "set", key: "addFriendReq:#{@sender}", value: false
+    DO "forward", receiver: @self, sender: @self, message: {"type":"removeFriendAckCS","CS":"addFriendReq:#{@sender}"}
+    DO "deliver", message: "adding friend req from : #{@sender} ack-CS"
+    return true
+
+UPON "arrived", ->
+  if @message.type is "removeFriend" and CS("member") is true
+    DO "deliver", message: "remove friend"
+    removeFriend("#{@sender}")
+    return true
+
+UPON "sent", ->
+  if @message.type is "removeFriend" and CS("member") is true
+    DO "deliver", message: "remove friend"
+    removeFriend("#{@receiver}")
+    DO "forward"
+    return true
+#============================================== END: Friend
+#============================================== START: Private-Messaging
+UPON "arrived", ->
+  if @message.type is "pm" and CS("member") is true
+    DO "deliver", message: "Received private message from #{@sender}. The message is: #{@message.msg}"
+    return true
+
+UPON "sent", ->
+  if @message.type is "pm" and CS("member") is true
+    DO "deliver", message: "got pm.. forwarding"
+    if @receiver in CS("friends")
+      DO "deliver", message: "got pm.. forwarding"
+
+      DO "forward", receiver: @receiver, sender: @self, message: @message
+      DO "deliver", message: "deliver message #{@message} to #{@receiver}"
+    return true
+#============================================== END: Private-Messaging
+
+
+
+#=========================================================
+removeFriend = (p) ->
+  if not CS("friends")?
+    return
+  if p in CS("friends")
+    arr = CS("friends")
+    arr.splice(arr.indexOf(p), 1)
+    DO "set", key:"friends", value: arr
+
+addFriend = (p) ->
+  if not CS("friends")?
+    DO "deliver", message: "Adding first friend..."
+    DO "set", key:"friends", value: [p]
+  else if p not in CS("friends")
+    DO "deliver", message: "Adding other friends..."
+    arr = CS("friends")
+    arr.push(p)
+    DO "set", key:"friends", value: arr
+
+
+removeFollower = (p) ->
+  if not CS("followers")?
+    return
+  if p in CS("followers")
+    arr = CS("followers")
+    arr.splice(arr.indexOf(p), 1)
+    DO "set", key:"followers", value: arr
+
+addFollower = (p) ->
+  if not CS("followers")?
+    DO "deliver", message: "Adding first follower..."
+    DO "set", key:"followers", value: [p]
+  else if p not in CS("followers")
+    DO "deliver", message: "Adding other followers..."
+    arr = CS("followers")
+    arr.push(p)
+    DO "set", key:"followers", value: arr
+
+
+deleteControlState = (controlStateKey) ->
+  if CS(controlStateKey)?
+    DO "unset", key: controlStateKey
+
+
+
+UPON "disconnected", ->
+  DO "quit"
+  return true
+
+# Can't add someone immediately after removing. -> we use obligations to remove persisting gossip entries after a delay dt
+# Can't set and unset in same event - addFriends takes a hit, need to remove ack-CS

@@ -1,0 +1,144 @@
+# Group:
+# Alok Singh (as2509)
+# ​​​​​​​Saurabh Singh (ss2716)
+
+law(theatre, language(coffeescript))
+
+# Platform: Windows
+# Run globe: java -cp libs\*;Moses.jar InteractiveAgent xxx yyy ./theatre.law globe  "{\"globe\": true}"
+# Run other parties: java -cp libs\*;Moses.jar InteractiveAgent 192.168.1.9 9000 ./theatre.law ppl1 {}
+
+#Get today's date in "mm-dd-yyyy" format
+today = new Date
+dd = today.getDate()
+mm = today.getMonth() + 1
+yyyy = today.getFullYear()
+if dd < 10
+  dd = '0' + dd
+if mm < 10
+  mm = '0' + mm
+today = mm + '-' + dd + '-' + yyyy
+
+# Create tickets using control states. Each ticket's date acts as the CS key. Tickets for a day are assumed to be identical.
+createTicket = (d1) ->
+  if CS(d1)?
+    DO "set", key:d1, value: CS(d1)+1
+  else
+    DO "set", key:d1, value: 1
+
+deleteTicket = (d1) ->
+  if not CS(d1)? or CS(d1) <= 0
+    return false
+  if CS(d1)? and CS(d1) > 0 
+    DO "set", key:d1, value: CS(d1)-1
+  return true
+
+# This function does not work because of some ridiculous error "02-15-2018 is not a function, it is string."
+# when 02-15-2018 is the date passed in the message. If d1 can be interpreted as a string to compare with today,
+# this function restricts globe to only allow todays tickets inside the theatre.
+deleteTodaysTicket = (d1) ->
+  if d1 == today
+    if deleteTicket(d1) is false
+      return "Illegal operation: delete Ticket"
+  else
+    return "Not today's ticket"
+  return true
+
+# Recognize globe upon its initialization
+UPON "adopted", ->
+  if @arguments.globe?
+    DO "set", key:"globe", value:@arguments.globe
+  return true
+
+# globe is not allowed to send any messages
+UPON "sent", ->
+  if CS("globe")?
+    DO "deliver", message: "Can't send message."
+    return true
+
+
+# When a client wants to buy a new ticket.
+UPON "sent", ->
+  if @message.type is "buyTicket" and not CS("globe") and @message.d?
+    DO "forward"
+    DO "deliver", message: {"status": "sent information", "message":@message}
+    return true
+
+# Allows globe to sell ticket to clients
+UPON "arrived", ->
+  if @message.type is "buyTicket" and CS("globe")? and @message.d?
+    if createTicket(@message.d) is false
+      DO "deliver", message: "Illegal operation: createTicket"
+    else
+      DO "deliver", message: "Sold ticket "+ "#{@message.d}" +" to "+@sender
+      # send to requester
+      DO "forward", receiver: @sender, sender: "#{@self}", message: {"d":@message.d, "type":"sellTicket"}
+    return true
+
+# Clients can now access their tickets after globe has issued them
+UPON "arrived", ->
+  if @message.type is "sellTicket" and not CS("globe") and @message.d?
+    if createTicket(@message.d) is false
+      DO "deliver", message: "Illegal operation: createTicket"
+    DO "deliver", message: "Created Ticket : " + @message.d
+    return true
+
+
+# Allows for transfer of tickets from one client to another
+UPON "arrived", ->
+  if @message.type is "transferTicket" and not CS("globe") and @message.d?
+    createTicket(@message.d)
+    DO "deliver", message: "Received ticket: "+@message.d+"from "+@sender
+    return true
+
+# Allows for transfer of tickets from one client to another
+UPON "sent", ->
+  if @message.type is "transferTicket" and not CS("globe")? and @message.d?
+    if deleteTicket(@message.d) is false
+      DO "deliver", message: "Illegal operation: deleteTicket"
+    else
+      DO "forward"
+    return true
+
+# When a client wants to use a ticket to enter the theatre
+UPON "sent", ->
+  if @message.type is "useTicket" and not CS("globe") and @message.d?
+    if deleteTicket(@message.d) is false
+      DO "deliver", message: "Illegal operation: no such ticket"
+    else
+      DO "forward"
+    return true
+
+# Allows clients to enter the theatre after globe verifies tickets and authorizes entry.
+UPON "arrived", ->
+  if @message.type is "useTicket" and CS("globe")? and @message.d?
+    if deleteTodaysTicket(@message.d) is not true
+      DO "deliver", message: deleteTodaysTicket(@message.d)
+    else
+      DO "deliver", message: deleteTodaysTicket(@message.d)
+      DO "deliver", message: @sender + "Used ticket "+ @message.d
+      DO "forward", receiver: @sender, sender: "#{@self}", message: {"d":@message.d, "type":"usedTicket"}
+    return true
+
+# Client can enter the theater.
+UPON "arrived", ->
+  if @message.type is "usedTicket" and not CS("globe") and @message.d?
+    DO "deliver", message: "Used Ticket : " + @message.d + ". You may enter now."
+    return true
+
+# Case when a client sends useTicket request to someone other than globe. The deleted ticket is restored.
+UPON "arrived", ->
+  if @message.type is "useTicket" and not CS("globe") and @message.d?
+    DO "forward", receiver: @sender, sender: "#{@self}", message: {type:"recreateTicket", d: @message.d}
+    return true
+
+UPON "arrived", ->
+  if @message.type is "recreateTicket" and not CS("globe") and @message.d?
+    createTicket(@message.d)
+    DO "deliver", message: "Recreated Ticket due to invalid receiver"
+    return true
+
+# Disconnect silently.
+UPON "disconnected", ->
+  DO "quit"
+  return true
