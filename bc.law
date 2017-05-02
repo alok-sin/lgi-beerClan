@@ -7,20 +7,6 @@ law(dosc, language(coffeescript))
 
 @license: MIT License
 ###
-###
-message Types:
-
-{"type":"invite"}
-{"type":"remove"}
-{"type":"post"}
-{"type":"addFollower"}
-{"type":"removeFollower"}
-{"type":"addFriend"}
-{"type":"removeFriend"}
-{"type":"pm"}
-{"type":"addInterest", "topic":"xxx"}
-{"type":"narrowCast", "topic":"xxx"}
-###
 
 # Create founders => "{\"founder\": true}"
 UPON "adopted", ->
@@ -29,8 +15,24 @@ UPON "adopted", ->
     DO "set", key: "founder", value: @arguments.founder
     DO "set", key: "member", value: @arguments.founder
     DO "deliver", message: "#{@self} is formed as founder"
+    DO "deliver", message: "Type help for more options"
   DO "deliver", message: "spawned: "
   return true
+#============================================== START: HELP
+UPON "sent", ->
+  if @message is "help"
+    DO "deliver", message: 'You can use the following types of messages:
+      {"type":"invite"}
+      {"type":"remove"}
+      {"type":"post"}
+      {"type":"addFollower"}
+      {"type":"removeFollower"}
+      {"type":"addFriend"}
+      {"type":"removeFriend"}
+      {"type":"pm"}
+      {"type":"addInterest", "topic":"xxx"}
+      {"type":"narrowCast", "topic":"xxx"}'
+#============================================== END: HELP
 
 #============================================== START: Invite
 UPON "sent", ->
@@ -341,6 +343,3 @@ deleteControlState = (controlStateKey) ->
 UPON "disconnected", ->
   DO "quit"
   return true
-
-# Can't add someone immediately after removing. -> we use obligations to remove persisting gossip entries after a delay dt
-# Can't set and unset in same event - addFriends takes a hit, need to remove ack-CS
