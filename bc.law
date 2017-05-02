@@ -1,8 +1,26 @@
 law(dosc, language(coffeescript))
 
-# Messages are dicts of type: {messageId:messageText}
+###
+@authors:
+  (as2509) Alok Singh
+  (ss2716) Saurabh Singh
 
+@license: MIT License
+###
+###
+message Types:
 
+{"type":"invite"}
+{"type":"remove"}
+{"type":"post"}
+{"type":"addFollower"}
+{"type":"removeFollower"}
+{"type":"addFriend"}
+{"type":"removeFriend"}
+{"type":"pm"}
+{"type":"addInterest", "topic":"xxx"}
+{"type":"narrowCast", "topic":"xxx"}
+###
 
 # Create founders => "{\"founder\": true}"
 UPON "adopted", ->
@@ -127,15 +145,15 @@ UPON "arrived", ->
 
 UPON "arrived", ->
   if @message.type is "post" and CS("member") is true
-    DO "deliver"
+    DO "deliver", message: @message.msg
     return true
 
 UPON "sent", ->
-  if @message.type is "post" and CS("member") is true
+  if @message.type is "post" and CS("member") is true and @message.msg?
     DO "deliver", message: "got post.. forwarding"
     for person in CS("followers")
-      DO "forward", receiver: person, message: @message
-      DO "deliver", message: "deliver message #{@message} to #{person}"
+      DO "forward", receiver: person, message: @message.msg
+      DO "deliver", message: "deliver message #{@message.msg} to #{person}"
     return true
 
 
@@ -211,13 +229,59 @@ UPON "sent", ->
   if @message.type is "pm" and CS("member") is true
     DO "deliver", message: "got pm.. forwarding"
     if @receiver in CS("friends")
-      DO "deliver", message: "got pm.. forwarding"
-
       DO "forward", receiver: @receiver, sender: @self, message: @message
       DO "deliver", message: "deliver message #{@message} to #{@receiver}"
+    else
+      DO "deliver", message: "The specified person is not your friend..."
     return true
 #============================================== END: Private-Messaging
 
+#============================================== START: Interests & NarrowCasting
+UPON "sent", ->
+  if @message.type is "addInterest" and CS("member") is true and @message.topic?
+    DO "deliver", message: "adding new Interest: #{@message.topic}"
+    addInterest("#{@message.topic}")
+
+UPON "sent", ->
+  if @message.type is "narrowCast" and CS("member") is true and @message.topic?
+    if not CS("gossip:narrowCast:#{@sender}:#{@message.topic}")?
+      DO "set", key: "gossip:narrowCast:#{@sender}:#{@message.topic}", value: true
+      DO "deliver", message: "got search request from #{@sender}"
+      # forward gossip to followers
+      if CS("followers")?
+        for person in CS("followers")
+          DO "deliver", message: "sender: #{@sender}, receiver: #{person}, messages: #{@self}"
+          DO "forward", receiver: person, sender: @sender, message: @message
+      else
+        DO "deliver", message: "No followers for narrowCast gossip"
+    return true
+
+UPON "arrived", ->
+  if @message.type is "narrowCast" and CS("member") is true and @message.topic?
+    # search for interest in self
+    DO "deliver", message: "searching for similar interest as #{@message.topic}!"
+    if CS("interests")? and "#{@message.topic}" in CS("interests")
+      DO "forward", receiver: @sender, sender: @self, message: {"type":"narrowCastReply", "topic":"#{@message.topic}"}
+      DO "deliver", message: "found matching interest"
+    else
+      DO "deliver", message: "cannot find matching interest.."
+    DO "deliver", message: "sending gossip for NarrowCasting!"
+    if not CS("gossip:narrowCast:#{@sender}:#{@message.topic}")?
+      DO "set", key: "gossip:narrowCast:#{@sender}:#{@message.topic}", value: true
+      DO "deliver", message: "got search request from #{@sender}"
+      # forward gossip to followers
+      if CS("followers")?
+        for person in CS("followers")
+          DO "deliver", message: "sender: #{@sender}, receiver: #{person}, messages: #{@self}"
+          DO "forward", receiver: person, sender: @sender, message: @message
+      else
+        DO "deliver", message: "No followers for narrowCast gossip"
+    return true
+
+UPON "arrived", ->
+  if @message.type is "narrowCastReply" and CS("member") is true and @message.topic?
+    DO "deliver", message: "Got narrow Cast reply from #{@sender} for the interest in: #{@message.topic}"
+#============================================== END: Interests & NarrowCasting
 
 
 #=========================================================
@@ -258,6 +322,15 @@ addFollower = (p) ->
     arr.push(p)
     DO "set", key:"followers", value: arr
 
+addInterest = (p) ->
+  if not CS("interests")?
+    DO "deliver", message: "Adding first interest..."
+    DO "set", key:"interests", value: [p]
+  else if p not in CS("interests")
+    DO "deliver", message: "Adding other interest..."
+    arr = CS("interests")
+    arr.push(p)
+    DO "set", key:"interests", value: arr
 
 deleteControlState = (controlStateKey) ->
   if CS(controlStateKey)?
